@@ -1,2 +1,2 @@
 # fe_investing
-An investment analysis tool uses financial engineering techniques for portfolio optimization.
+An investment analysis tool implementing financial engineering techniques for portfolio optimization.
