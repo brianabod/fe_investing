@@ -31,6 +31,10 @@ It is important to note that this strategy is not fool-proof. The main risk with
 
 To start, we need to identify pairs or groups of stocks that are cointegrated. This can be done either by brute force or by more sophisticated methods. The common trend between two cointegrated stocks might not be scaled identically. We use a factor, **gamma**, to represent the scaling difference of the common trend between two stocks. Once a group of potentially cointegrated stocks have been identified, we need to estimate the gamma factor. For this we can use a regression model. Least squares is a simple approach, but one that might break easily with changing statistical parameters in the data. A Kalman filter is a more robust tool for tracking gamma. A Kalman filter is essentially a adaptive way to track an unknown value given some indirect measurements and some statistical model of the relationship between those measurements and the unknown value.
 
+### References
+
+D Palomar, Y Feng. A Signal Processing Perspective on Financial Engineering. (https://palomar.home.ece.ust.hk/papers/2016/Feng&Palomar-FnT2016.pdf)
+
 ## Testing
 
 To test the statistical arbitrage methods, market trading is simulated using either generated data or real data (downloaded from Yahoo Finance).
