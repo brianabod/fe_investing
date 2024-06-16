@@ -1,6 +1,6 @@
 # fe_investing
 
-Fe Investing, or "Iron Investing", is an investment analysis tool implementing statistical arbitrage for portfolio optimization.
+Fe Investing, or "Iron Investing", is a financial engineering investment analysis tool implementing statistical arbitrage methods for portfolio optimization.
 
 Author: Brian Abod
 
