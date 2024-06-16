@@ -24,7 +24,7 @@ class TimeSeries:
         return self.df.columns
 
     def mean(self, col: str):
-        return mean(self.df[col].tolist())
+        return mean(list(self.df[col]))
 
     def volatility(self, col: str):
         return volatility(self.df[col].tolist())
