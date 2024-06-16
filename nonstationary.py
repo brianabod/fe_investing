@@ -1,5 +1,24 @@
 import numpy as np
 
+"""
+A univariate time series is said to be "integrated" if it can be brought to
+stationary through differencing. The number of differences required to achieve
+stationarity is called the order of integration.
+
+An n-dimensional time series is "cointegrated" if some linear combination of
+the component variables is stationary. The combination is called a
+cointegrated relation, and the coefficients form a cointegrated vector.
+
+Cointegration is distinguished from traditional economic equilibrium, in which
+a balance of forces produces stable long-term levels in the variables.
+Cointegrated variables are generally unstable in their levels, but exhibit
+mean-reverting "spreads" (generalized by the cointegrating relation) that
+force the variables to move around common stochastic trends. Cointegration is
+also distinguished from the short-term synchronies of positive covariance,
+which only measures the tendency to move together at each time step.
+Modifications of the VAR model to include cointegrated variables balances the
+short-term dynamics of the system with long-term tendencies.
+"""
 
 def mean(time_series):
     return np.mean(time_series)
