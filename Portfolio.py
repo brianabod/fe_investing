@@ -10,7 +10,9 @@ from utility import draw_zero_axis, plot_cauchy, plot_gaussian
 
 class Portfolio:
 
-    def __init__(self, stocks: list, metrics=[Stock.RETURN, Stock.LOG_RETURN]):
+    def __init__(self, stocks: list, metrics=[Stock.RETURN, Stock.LOG_RETURN], max_values:int=10000):
+        for stock in stocks:
+            stock.time_series.df = stock.time_series.df.head(max_values)
         self.stocks = stocks
         self.symbols = [stock.symbol for stock in stocks]
         self.reference_stock: Stock = stocks[0]
@@ -52,11 +54,17 @@ class Portfolio:
             ax = fig.add_subplot(2, 1, figure_idx)
             if figure_idx != 1:
                 legend = False
+            means = []
+            volatilities = []
             for stock in self.stocks:
                 stock: Stock
                 stock.plot_distribution(ax, metric)
-            plot_gaussian(ax, stock.mean(metric), stock.volatility(metric))
-            plot_cauchy(ax, stock.mean(metric), 0.25 * stock.volatility(metric))
+                means.append(stock.mean(metric))
+                volatilities.append(stock.volatility(metric))
+            avg_mean = sum(means) / len(means)
+            avg_volatility = sum(volatilities) / len(volatilities)
+            plot_gaussian(ax, avg_mean, avg_volatility)
+            plot_cauchy(ax, avg_mean, 0.25 * avg_volatility)
             ax.set_xlim([-0.25, 0.25])
             ax.set_ylim([0, 100])
             if legend:
@@ -117,11 +125,32 @@ class Portfolio:
             metric, window_size
         )
         fig = plt.figure()
-        ax = fig.add_subplot(1, 1, 1)
-        draw_zero_axis(ax)
+        ax1 = fig.add_subplot(3, 1, 1)
+        draw_zero_axis(ax1)
+        difference_kwargs = {
+            "ylabel": f"{u'Δ'}{metric} (USD)",
+            "ylim": [-0.1, 0.1],
+            "alpha": 0.3,
+        }
+        ax2 = fig.add_subplot(3, 1, 2)
+        draw_zero_axis(ax2)
+        mean_difference_kwargs = {
+            "ylabel": f"Mean\n{u'Δ'}{metric} (USD)",
+            "ylim": [-0.01, 0.01],
+            "alpha": 0.7,
+        }
+        ax3 = fig.add_subplot(3, 1, 3)
+        draw_zero_axis(ax3)
+        volatility_difference_kwargs = {
+            "ylabel": f"Volatility\n{u'Δ'}{metric} (USD)",
+            "ylim": [-0.01, 0.01],
+            "alpha": 0.7,
+        }
         for stock in self.stocks[1:]:
             stock: Stock
             label = f"{stock.symbol}-{self.reference_stock.symbol}"
+            mean_ts = stock.mean_over_time(metric, window_size)
+            volatility_ts = stock.volatility_over_time(metric, window_size)
             difference_ts = TimeSeries(
                 pd.DataFrame(
                     {
@@ -131,7 +160,6 @@ class Portfolio:
                 ),
                 Stock.DATE,
             )
-            mean_ts = stock.mean_over_time(metric, window_size)
             mean_difference_ts = TimeSeries(
                 pd.DataFrame(
                     {
@@ -141,7 +169,6 @@ class Portfolio:
                 ),
                 Stock.DATE,
             )
-            volatility_ts = stock.volatility_over_time(metric, window_size)
             volatility_difference_ts = TimeSeries(
                 pd.DataFrame(
                     {
@@ -152,36 +179,19 @@ class Portfolio:
                 ),
                 Stock.DATE,
             )
-
             common_kwargs = {
                 "label": label,
                 "color": stock.color,
                 "xlabel": Stock.DATE,
                 "grid": True,
             }
-            difference_kwargs = deepcopy(common_kwargs)
-            difference_kwargs.update(
-                {
-                    "ylabel": f"{metric} Difference",
-                    "alpha": 0.3,
-                }
-            )
-            difference_ts.plot(label, ax, difference_kwargs)
-            mean_difference_kwargs = deepcopy(common_kwargs)
-            mean_difference_kwargs.update(
-                {
-                    "ylabel": f"{metric} Mean Difference",
-                    "alpha": 0.7,
-                }
-            )
-            mean_difference_ts.plot(label, ax, mean_difference_kwargs)
-            volatility_difference_kwargs = deepcopy(common_kwargs)
-            volatility_difference_kwargs.update(
-                {
-                    "ylabel": f"{metric} Volatility Difference",
-                    "alpha": 0.7,
-                }
-            )
-            volatility_difference_ts.plot(label, ax, volatility_difference_kwargs)
-        ax.legend()
+            difference_kwargs.update(common_kwargs)
+            mean_difference_kwargs.update(common_kwargs)
+            volatility_difference_kwargs.update(common_kwargs)
+            difference_ts.plot(label, ax1, difference_kwargs)
+            mean_difference_ts.plot(label, ax2, mean_difference_kwargs)
+            volatility_difference_ts.plot(label, ax3, volatility_difference_kwargs)
+        ax1.legend()
+        ax2.legend()
+        ax3.legend()
         return fig
