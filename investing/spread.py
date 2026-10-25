@@ -2,7 +2,7 @@
 
     spread_t = weights . log_prices_t - intercept
 
-Examples: weights [1, -gamma] for a pair (10.14), a Johansen vector beta
+Examples: weights [1, -gamma] for a pair (10.14), a basket test's cointegrating vector beta
 (10.36), or a stock minus its factor exposure (10.37). Holding one unit of the
 spread means holding ``weights[i]`` dollars of stock i, rebalanced daily
 (Remark 10.3).

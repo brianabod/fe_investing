@@ -1,10 +1,11 @@
 """Models of how a spread reverts to its mean (Feng & Palomar, Sec. 10.4.2).
 
-- ``OrnsteinUhlenbeck``: the discretized Ornstein-Uhlenbeck / AR(1) model
+- ``MeanReversionModel``: an AR(1) model, the discrete form of the
+  Ornstein-Uhlenbeck process,
       x_{t+1} = A + B x_t + C eps_{t+1}            (10.30)-(10.33)
   Gives the speed of mean reversion and the half-life.
 - ``KalmanSpreadFilter``: the observed spread is a noisy reading of a hidden
-  Ornstein-Uhlenbeck spread,
+  mean-reverting spread,
       z_t = x_t + D w_t                            (10.34)
   Its parameters are fitted with Expectation-Maximization, and ``filter``
   returns the real-time estimate of the hidden spread.
@@ -22,7 +23,7 @@ from .regression import least_squares
 
 
 @dataclass
-class OrnsteinUhlenbeck:
+class MeanReversionModel:
     intercept: float        # A
     persistence: float      # B, between 0 and 1 for a mean-reverting spread
     state_noise: float      # C
@@ -64,19 +65,21 @@ class OrnsteinUhlenbeck:
         return np.log(1 + 0.5 * (np.sqrt((squared - 3) ** 2 + 4 * squared) + squared - 3)) / self.reversion_speed
 
 
-def fit_ornstein_uhlenbeck(spread, time_step: float = 1.0) -> OrnsteinUhlenbeck:
+def fit_mean_reversion(spread, time_step: float = 1.0) -> MeanReversionModel:
     """Least-squares AR(1) fit of the spread, eq. (10.33)."""
     values = np.asarray(spread, dtype=float)
     regressors = np.column_stack([np.ones(len(values) - 1), values[:-1]])
     fit = least_squares(values[1:], regressors)
     intercept, persistence = fit.coefficients
     state_noise = float(np.std(fit.residuals, ddof=2))
-    return OrnsteinUhlenbeck(float(intercept), float(persistence), state_noise, time_step)
+    return MeanReversionModel(float(intercept), float(persistence), state_noise, time_step)
 
 
 @dataclass
 class KalmanSpreadFilter:
-    """Hidden spread x_t (AR(1)) observed with noise:
+    """Kalman filter that separates a spread's real moves from day-to-day noise.
+
+    Hidden spread x_t (AR(1)) observed with noise:
         x_{t+1} = A + B x_t + C eps_{t+1}   (10.33)
         z_t     = x_t + D w_t               (10.34)
     """
@@ -89,8 +92,8 @@ class KalmanSpreadFilter:
     log_likelihood: float = np.nan
 
     @property
-    def hidden_spread_model(self) -> OrnsteinUhlenbeck:
-        return OrnsteinUhlenbeck(self.intercept, self.persistence, self.state_noise)
+    def hidden_spread_model(self) -> MeanReversionModel:
+        return MeanReversionModel(self.intercept, self.persistence, self.state_noise)
 
     def _run_filter(self, observations: np.ndarray):
         count = len(observations)
@@ -122,7 +125,7 @@ class KalmanSpreadFilter:
         return filtered
 
     def smooth(self, spread):
-        """Rauch-Tung-Striebel smoother E[x_t | z_1..z_T]. Uses future data,
+        """Backward smoothing pass (Rauch-Tung-Striebel): E[x_t | z_1..z_T]. Uses future data,
         so use it for fitting and analysis only, never for trading signals."""
         observations = np.asarray(spread, dtype=float)
         predicted_state, predicted_variance, filtered_state, filtered_variance, log_likelihood = \
@@ -141,7 +144,7 @@ class KalmanSpreadFilter:
     def fit(cls, spread, max_iterations: int = 200, tolerance: float = 1e-7) -> "KalmanSpreadFilter":
         """Expectation-Maximization estimate of A, B, C, D."""
         observations = np.asarray(spread, dtype=float)
-        start = fit_ornstein_uhlenbeck(observations)
+        start = fit_mean_reversion(observations)
         # Start by splitting the AR(1) residual variance between state and observation noise.
         model = cls(intercept=start.intercept,
                     persistence=float(np.clip(start.persistence, 0.0, 0.999)),

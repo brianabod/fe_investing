@@ -11,6 +11,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["matplotlib", "numpy", "pandas", "scipy"]
 
+[project.scripts]
+fe-download = "investing.price_download:main"
+
 [project.urls]
 Repository = "https://github.com/brianabod/fe_investing"
 

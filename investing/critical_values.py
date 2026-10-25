@@ -2,13 +2,13 @@
 
 These are MacKinnon's published response surfaces, the same tables statsmodels
 uses:
-- Dickey-Fuller / Engle-Granger critical values: MacKinnon (2010).
-- Dickey-Fuller / Engle-Granger p-values: MacKinnon (1994).
-- Johansen trace and maximum-eigenvalue tests: MacKinnon, Haug & Michelis (1999),
-  for the case of a constant term.
+- Stationarity and pair-test critical values: MacKinnon (2010).
+- Stationarity and pair-test p-values: MacKinnon (1994).
+- Basket rank-test (trace and maximum-eigenvalue) critical values:
+  MacKinnon, Haug & Michelis (1999), for the case of a constant term.
 
 ``series_count`` is the number of I(1) series in the test: 1 for a plain ADF
-test, and the number of stocks for an Engle-Granger test.
+test, and the number of stocks for a pair (regression) test.
 """
 
 import numpy as np
@@ -17,7 +17,7 @@ from scipy.stats import norm
 CONFIDENCE_LEVELS = ("1%", "5%", "10%")
 
 # [series_count - 1][level] -> coefficients of 1, 1/T, 1/T^2, 1/T^3
-_DICKEY_FULLER_SURFACES = {
+_STATIONARITY_SURFACES = {
     "constant": np.array([
         [[-3.43035, -6.5393, -16.786, -79.433], [-2.86154, -2.8903, -4.234, -40.040], [-2.56677, -1.5384, -2.809, 0]],
         [[-3.89644, -10.9519, -33.527, 0], [-3.33613, -6.1101, -6.823, 0], [-3.04445, -4.2412, -2.720, 0]],
@@ -59,23 +59,23 @@ _P_VALUE_TABLES = {
     ),
 }
 
-# Johansen, constant term. [series_count - rank - 1] -> (90%, 95%, 99%)
-JOHANSEN_LEVELS = ("90%", "95%", "99%")
-JOHANSEN_TRACE = np.array([
+# Basket rank test, constant term. [series_count - rank - 1] -> (90%, 95%, 99%)
+BASKET_CONFIDENCE_LEVELS = ("90%", "95%", "99%")
+BASKET_TRACE_CRITICAL_VALUES = np.array([
     [2.7055, 3.8415, 6.6349], [13.4294, 15.4943, 19.9349], [27.0669, 29.7961, 35.4628],
     [44.4929, 47.8545, 54.6815], [65.8202, 69.8189, 77.8202], [91.109, 95.7542, 104.9637],
 ])
-JOHANSEN_MAXIMUM_EIGENVALUE = np.array([
+BASKET_MAXIMUM_EIGENVALUE_CRITICAL_VALUES = np.array([
     [2.7055, 3.8415, 6.6349], [12.2971, 14.2639, 18.52], [18.8928, 21.1314, 25.865],
     [25.1236, 27.5858, 32.7172], [31.2379, 33.8777, 39.3693], [37.2786, 40.0763, 45.8662],
 ])
 MAXIMUM_SERIES = 6
 
 
-def dickey_fuller_critical_values(series_count: int = 1, trend: str = "constant",
+def stationarity_critical_values(series_count: int = 1, trend: str = "constant",
                                   observation_count: float = np.inf) -> dict[str, float]:
-    """1% / 5% / 10% critical values for an ADF or Engle-Granger statistic."""
-    table = _DICKEY_FULLER_SURFACES[trend]
+    """1% / 5% / 10% critical values for a stationarity or pair-test statistic."""
+    table = _STATIONARITY_SURFACES[trend]
     if not 1 <= series_count <= MAXIMUM_SERIES:
         raise ValueError(f"Critical values are tabulated for 1-{MAXIMUM_SERIES} series.")
     inverse_count = 0.0 if np.isinf(observation_count) else 1.0 / observation_count
@@ -83,8 +83,8 @@ def dickey_fuller_critical_values(series_count: int = 1, trend: str = "constant"
     return dict(zip(CONFIDENCE_LEVELS, values.tolist()))
 
 
-def dickey_fuller_p_value(statistic: float, series_count: int = 1, trend: str = "constant") -> float:
-    """Approximate p-value for an ADF or Engle-Granger statistic."""
+def stationarity_p_value(statistic: float, series_count: int = 1, trend: str = "constant") -> float:
+    """Approximate p-value for a stationarity or pair-test statistic."""
     table = _P_VALUE_TABLES[trend]
     index = series_count - 1
     if statistic > table["maximum"][index]:

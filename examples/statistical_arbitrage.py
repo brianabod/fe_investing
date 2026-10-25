@@ -4,8 +4,8 @@
    recent year.
 2. Pick an entry threshold for the strongest pair (10.4.1) and show its
    spread, positions and in-sample profit (Figs. 10.6 / 10.10 / 10.12).
-3. Walk-forward, out-of-sample backtest with costs for pairs, Johansen
-   baskets and factor-residual spreads (10.5).
+3. Walk-forward, out-of-sample backtest with costs for pairs, baskets
+   and factor-residual spreads (10.5).
 
 Usage:  python examples/statistical_arbitrage.py [--data-directory DIR] [--symbols A B C]
 """
@@ -22,15 +22,15 @@ import pandas as pd
 from command_line import load_portfolio, parse_arguments
 from investing import (
     FactorBuilder,
-    JohansenBuilder,
+    BasketBuilder,
     KalmanSpreadFilter,
     PairsBuilder,
     Spread,
     TradingRule,
     compute_positions,
-    engle_granger_strongest,
-    fit_ornstein_uhlenbeck,
-    johansen,
+    pair_cointegration_test,
+    fit_mean_reversion,
+    basket_cointegration_test,
     mean_crossing_rate,
     optimal_threshold,
     performance_summary,
@@ -42,7 +42,7 @@ from investing.plotting import apply_style, plot_equity_curves, plot_spread_trad
 from investing.pair_selection import closest_basket
 from investing.threshold import THRESHOLD_METHODS, simulate_round_trips
 
-BASKET_SIZE = 3         # stocks in each Johansen basket
+BASKET_SIZE = 3         # stocks in each basket
 FITTING_DAYS = 252      # days used to fit each model
 TRADING_DAYS = 126      # days each fitted model is traded out-of-sample
 COST_BASIS_POINTS = 5.0 # per $1 of gross exposure traded
@@ -56,17 +56,17 @@ def analyze_recent(prices: pd.DataFrame):
     ranking = rank_pairs(recent)
     print(ranking.to_string(index=False, float_format="%.3f"))
 
-    print("\n== Engle-Granger cointegration tests ==")
+    print("\n== Pair cointegration tests ==")
     rows = []
     for pair in ranking.pair:
-        result = engle_granger_strongest(log_prices[list(pair)])
+        result = pair_cointegration_test(log_prices[list(pair)])
         rows.append({
             "pair": "-".join(pair),
             "dependent": result.dependent,
             "hedge_ratio": float(result.hedge_ratios.iloc[0]),
             "statistic": result.statistic,
             "p_value": result.p_value,
-            "half_life": fit_ornstein_uhlenbeck(result.residuals).half_life,
+            "half_life": fit_mean_reversion(result.residuals).half_life,
             "crossing_rate": mean_crossing_rate(result.residuals),
             "result": result,
         })
@@ -74,8 +74,8 @@ def analyze_recent(prices: pd.DataFrame):
     print(tests.drop(columns="result").to_string(index=False, float_format="%.3f"))
 
     symbols = closest_basket(recent, BASKET_SIZE)
-    print(f"\n== Johansen test ({', '.join(symbols)}: the {len(symbols)} most closely related stocks) ==")
-    basket = johansen(log_prices[symbols])
+    print(f"\n== Basket cointegration test ({', '.join(symbols)}: the {len(symbols)} most closely related stocks) ==")
+    basket = basket_cointegration_test(log_prices[symbols])
     for rank, statistic in enumerate(basket.trace_statistics):
         print(f"  H0: rank <= {rank}: trace={statistic:.2f}  5% critical value={basket.critical_value(rank):.2f}")
     print(f"  cointegration rank at 95%: {basket.rank()}")
@@ -100,7 +100,7 @@ def plot_best_pair(recent: pd.DataFrame, result):
 
     other = result.hedge_ratios.index[0]
     title = (f"In-sample pair trade: {result.dependent} − {result.hedge_ratios.iloc[0]:.2f} × {other}  "
-             f"(entry threshold {entry_threshold:.2f}, half-life {fit_ornstein_uhlenbeck(values).half_life:.1f} days)")
+             f"(entry threshold {entry_threshold:.2f}, half-life {fit_mean_reversion(values).half_life:.1f} days)")
     plot_spread_trading(np.log(recent[[result.dependent, other]]), standardized, entry_threshold,
                         positions, filtered, title)
     plot_threshold_curves(threshold_results)
@@ -108,8 +108,8 @@ def plot_best_pair(recent: pd.DataFrame, result):
 
 def run_backtests(prices: pd.DataFrame):
     strategies = {
-        "Pairs (Engle-Granger)": PairsBuilder(max_spreads=3),
-        f"Johansen basket ({BASKET_SIZE} most related stocks)": JohansenBuilder(basket_size=BASKET_SIZE),
+        "Pairs": PairsBuilder(max_spreads=3),
+        f"Baskets ({BASKET_SIZE} most related stocks)": BasketBuilder(basket_size=BASKET_SIZE),
         "Factor residuals (1 principal component)": FactorBuilder(factor_count=1),
     }
     rule = TradingRule(threshold_method="empirical", stop_loss=4.0)

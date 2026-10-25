@@ -19,6 +19,7 @@ from .plotting import (
     INK_MUTED,
     INK_PRIMARY,
     INK_SECONDARY,
+    SERIES_COLORS,
     add_figure_legend,
     draw_zero_axis,
     format_percent,
@@ -43,9 +44,10 @@ class Portfolio:
         self.symbols = [stock.symbol for stock in stocks]
         self.reference_stock: Stock = stocks[0]
         # Stocks without a color get the next palette slot, in portfolio order.
+        # The palette has 8 colors; any further stocks are drawn in neutral gray.
         for index, stock in enumerate(stocks):
             if stock.color is None:
-                stock.color = series_color(index)
+                stock.color = series_color(index) if index < len(SERIES_COLORS) else INK_MUTED
         # One table per metric with a column per stock, matched by date.
         self.metrics = {
             metric: TimeSeries(self.aligned(metric).reset_index(), Stock.DATE)
@@ -96,8 +98,14 @@ class Portfolio:
 
     # --- Exploratory plots -------------------------------------------------
 
+    def _warn_if_too_many_lines(self, count: int):
+        if count > len(SERIES_COLORS):
+            warnings.warn(f"{count} stocks on one chart is hard to read; stocks past the first "
+                          f"{len(SERIES_COLORS)} are gray. Plot a subset (e.g. --symbols) for clearer charts.")
+
     def plot_time_series(self):
         """Adjusted prices (log scale) and daily returns for every stock."""
+        self._warn_if_too_many_lines(len(self.stocks))
         fig, (price_ax, return_ax, log_return_ax) = plt.subplots(
             3, 1, sharex=True, figsize=(10, 8), height_ratios=[1.4, 1, 1])
         for stock in self.stocks:
@@ -117,8 +125,8 @@ class Portfolio:
         return fig
 
     def plot_distributions(self, value_range=(-0.1, 0.1)):
-        """Histogram of each stock's returns with its own Gaussian and Cauchy fits.
-        Fat tails show up as mass the Gaussian misses."""
+        """Histogram of each stock's returns with its own Gaussian and Cauchy
+        fits. Fat tails show up as mass the Gaussian misses."""
         metrics = [Stock.RETURN, Stock.LOG_RETURN]
         fig, axes = plt.subplots(len(metrics), len(self.stocks), sharex=True, sharey=True,
                                  figsize=(3.4 * len(self.stocks) + 1, 6.5), squeeze=False)
@@ -148,6 +156,7 @@ class Portfolio:
 
     def plot_statistics_over_time(self, window_size: int, metric=Stock.LOG_RETURN):
         """Rolling mean and volatility (window_size in trading days)."""
+        self._warn_if_too_many_lines(len(self.stocks))
         fig, (mean_ax, volatility_ax) = plt.subplots(2, 1, sharex=True, figsize=(10, 6.5))
         for stock in self.stocks:
             stock.mean_over_time(metric, window_size).plot(
@@ -169,6 +178,7 @@ class Portfolio:
         difference, its rolling mean, and the gap in rolling volatility."""
         if len(self.stocks) < 2:
             raise ValueError("Portfolio must contain at least 2 stocks to compare.")
+        self._warn_if_too_many_lines(len(self.stocks) - 1)
         table = self.metrics[metric].df.set_index(Stock.DATE)
         reference = self.reference_stock.symbol
         reference_volatility = table[reference].rolling(window_size).std()

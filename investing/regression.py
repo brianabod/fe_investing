@@ -14,7 +14,7 @@ class LeastSquaresResult:
     observation_count: int
 
     @property
-    def akaike_information_criterion(self) -> float:
+    def information_criterion(self) -> float:
         """AIC up to a constant, used to choose the number of lags."""
         count, parameters = self.observation_count, len(self.coefficients)
         return count * np.log(self.sum_squared_residuals / count) + 2 * parameters

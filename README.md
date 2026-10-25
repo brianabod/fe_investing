@@ -27,7 +27,7 @@ its mean. The strategy trades on the noise around the shared trend.
 
 The trend may not have the same size in both stocks. The scaling factor
 **gamma** (the hedge ratio) is estimated by regression: least squares in the
-Engle-Granger test. A Kalman filter can additionally clean up the noisy
+pair cointegration test. A Kalman filter can additionally clean up the noisy
 spread before trading.
 
 The strategy isn't foolproof. The main risk is that the cointegration doesn't
@@ -44,8 +44,8 @@ The code builds up in four steps:
    level.
 3. **Pairs trading.** Find two stocks whose spread is stationary. Sell it
    when it's high and buy it when it's low.
-4. **Statistical arbitrage.** Generalize to baskets of stocks (Johansen) and
-   to stock-minus-market-factor spreads. Then test everything out-of-sample
+4. **Statistical arbitrage.** Generalize to baskets of three or more stocks
+   and to stock-minus-market-factor spreads. Then test everything out-of-sample
    with trading costs.
 
 ## Setup
@@ -64,8 +64,9 @@ To use the package from another project:
 `pip install git+https://github.com/brianabod/fe_investing.git`, then
 `import investing`.
 
-Price data is not stored in the repository; see [Data](#data). The unit tests
-use synthetic data and need no downloads.
+Price data is not stored in the repository. Download it with
+`python -m investing.price_download SYMBOL ...`; see [Data](#data). The unit
+tests use synthetic data and need no downloads or network access.
 
 ## Quick start
 
@@ -104,20 +105,35 @@ pyproject.toml        makes the repo pip-installable
 | `time_series.py` | `TimeSeries` (a DataFrame with a date column, oldest first), `mean`, `volatility`, `function_of_time` (sliding-window statistics) | — |
 | `stock.py` | `Stock`: one CSV, adjusted prices, close-to-close `Return` and `Log-Return`, distribution plots | — |
 | `portfolio.py` | `Portfolio`: stocks matched by date. `prices()` and `log_prices()` feed the statistical arbitrage code; also exploratory plots | — |
-| `plotting.py` | Shared chart style (`apply_style`, color-blind-safe `series_color`), Gaussian/Cauchy curves, spread trading chart, threshold curves, equity curves | Figs. 10.6, 10.10-10.12 |
+| `price_download.py` | `download_prices`, `save_prices`, and a command line: daily prices from Yahoo Finance into `data/<SYMBOL>.csv` | — |
+| `plotting.py` | Shared chart style (`apply_style`, color-blind-safe `series_color`), Gaussian and Cauchy density curves, spread trading chart, threshold curves, equity curves | Figs. 10.6, 10.10-10.12 |
 | `market_simulation.py` | `generate_cointegrated_time_series`: synthetic pairs with a known hedge ratio | 10.1 |
 | `regression.py` | `least_squares` and trend terms shared by the tests and models | — |
-| `critical_values.py` | MacKinnon critical-value and p-value tables | — |
-| `cointegration.py` | `augmented_dickey_fuller`, `engle_granger`, `engle_granger_strongest`, `johansen`, `mean_crossing_rate` | 10.3, 2.6 |
+| `critical_values.py` | Published critical-value and p-value tables for the tests | — |
+| `cointegration.py` | `stationarity_test` (one series), `pair_cointegration_test` (two stocks), `basket_cointegration_test` (three or more), `mean_crossing_rate` | 10.3, 2.6 |
 | `pair_selection.py` | `normalized_price_distance`, principal-component factor model, `rank_pairs`, `closest_basket` | 10.2 |
 | `spread.py` | `Spread` (weighted log-prices), `standardize` | 10.3 |
-| `mean_reversion.py` | `OrnsteinUhlenbeck` (half-life, reversion speed), `KalmanSpreadFilter` (fitted with EM) | 10.4.2 |
+| `mean_reversion.py` | `MeanReversionModel` (half-life, reversion speed), `KalmanSpreadFilter` (fitted with EM) | 10.4.2 |
 | `threshold.py` | Optimal entry threshold: parametric, smoothed nonparametric, or by replaying the rule | 10.4.1 |
-| `spread_builders.py` | `PairsBuilder`, `JohansenBuilder`, `FactorBuilder`: find spreads in a window of data | 10.5 |
+| `spread_builders.py` | `PairsBuilder`, `BasketBuilder`, `FactorBuilder`: find spreads in a window of data | 10.5 |
 | `backtest.py` | `TradingRule`, `compute_positions`, `walk_forward`, `performance_summary` | — |
 
 The statistical tests are written with numpy and scipy only. Their
 statistics and p-values match statsmodels to within rounding error.
+
+### Methods and their origins
+
+Functions are named for what they do. The table credits the people who
+developed each method, for reference when reading the literature.
+
+| Function or class | Standard name |
+|---|---|
+| `stationarity_test` | Augmented Dickey-Fuller test |
+| `pair_cointegration_test` | Engle-Granger two-step test |
+| `basket_cointegration_test` | Johansen test |
+| `MeanReversionModel` | discretized Ornstein-Uhlenbeck process (AR(1)) |
+| `KalmanSpreadFilter` | Kalman filter, fitted by Expectation-Maximization |
+| `critical_values.py` | MacKinnon (1994, 2010); MacKinnon, Haug & Michelis (1999) |
 
 ## Example
 
@@ -173,12 +189,42 @@ step.
 
 ## Data
 
-Price data lives in the local `data/` folder, which git ignores. Save one
-daily CSV per stock, named `<SYMBOL>.csv`, in Yahoo Finance's format:
+Price data lives in the local `data/` folder, which git ignores: one daily
+CSV per stock, named `<SYMBOL>.csv`, in Yahoo Finance's format:
 
 ```
 Date,Open,High,Low,Close,Adj Close,Volume
 ```
+
+### Downloading prices
+
+Download the full daily history for any symbols (as Yahoo writes them) from
+the repo root:
+
+```bash
+.venv/bin/python -m investing.price_download SYMBOL1 SYMBOL2 SYMBOL3
+```
+
+This writes `data/SYMBOL1.csv` and so on. Run it again to refresh: each run
+fetches the full history, because past adjusted closes change after every
+dividend or split.
+- **Options:** `--data-directory` saves somewhere else, and `--start` /
+  `--end` limit the date range.
+- **Bad symbols:** a symbol that fails is reported and skipped; the rest
+  still download.
+- **Unfinished days:** a bar for today is left out while the market is still
+  open.
+
+From Python, `from investing.price_download import download_prices,
+save_prices`: `download_prices(symbol)` returns the table and
+`save_prices(symbol, "data")` writes the file. If the package is
+pip-installed, the same download is available as the `fe-download` command.
+
+The data comes from Yahoo's public but unofficial chart endpoint. It can
+change or rate-limit without notice, and the data is for personal research
+under Yahoo's terms.
+
+### Loading prices
 
 `Portfolio.from_directory("data")` loads every CSV it finds, sorted by name.
 It skips files with less than a year of valid prices (with a warning) and
@@ -194,8 +240,11 @@ https://palomar.home.ece.ust.hk/papers/2016/Feng&Palomar-FnT2016.pdf
 ## Conventions
 
 - **Names:** use full words for files, functions and variables
-  (`normalized_price_distance`, not `npd`). Exceptions are kept to standard
-  idioms:
+  (`normalized_price_distance`, not `npd`). Name methods for what they do
+  (`pair_cointegration_test`), not who developed them. Credit the developer
+  in the docstring instead. Industry-standard terms are fine as names:
+  "Kalman filter", "Gaussian", "Cauchy", "Sharpe ratio". Abbreviations are
+  kept to standard idioms:
   - library aliases: `np`, `pd`, `plt`;
   - matplotlib objects: `fig`, `ax`, `kwargs`;
   - loop indices: `t` for time;

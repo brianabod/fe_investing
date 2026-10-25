@@ -2,8 +2,8 @@
 
 Each builder is one way to go from pairs trading to statistical arbitrage:
 
-- ``PairsBuilder``: preselect pairs (Sec. 10.2), then run Engle-Granger (10.3).
-- ``JohansenBuilder``: Johansen/VECM on a basket of stocks (Sec. 10.5.1).
+- ``PairsBuilder``: preselect pairs (Sec. 10.2), then run the pair cointegration test (10.3).
+- ``BasketBuilder``: the basket cointegration test (VECM) on a few related stocks (Sec. 10.5.1).
 - ``FactorBuilder``: each stock minus its common-factor exposure (Sec. 10.5.2).
 
 A builder is called with fitting-window data only, so nothing it computes can
@@ -17,8 +17,8 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 
-from .cointegration import augmented_dickey_fuller, engle_granger_strongest, johansen
-from .mean_reversion import fit_ornstein_uhlenbeck
+from .cointegration import stationarity_test, pair_cointegration_test, basket_cointegration_test
+from .mean_reversion import fit_mean_reversion
 from .pair_selection import closest_basket, normalized_price_distance, principal_component_factor_model
 from .spread import Spread
 
@@ -55,11 +55,11 @@ class PairsBuilder:
 
         candidates = []
         for pair in pairs:
-            result = engle_granger_strongest(log_prices[list(pair)])
+            result = pair_cointegration_test(log_prices[list(pair)])
             hedge_ratio = float(result.hedge_ratios.iloc[0])
             if result.p_value > self.max_p_value or abs(hedge_ratio) < self.min_hedge_ratio:
                 continue
-            half_life = fit_ornstein_uhlenbeck(result.residuals).half_life
+            half_life = fit_mean_reversion(result.residuals).half_life
             if not _half_life_in_range(half_life, self.min_half_life, self.max_half_life):
                 continue
             other = result.hedge_ratios.index[0]
@@ -70,7 +70,7 @@ class PairsBuilder:
 
 
 @dataclass
-class JohansenBuilder:
+class BasketBuilder:
     max_spreads: int = 1
     lag_differences: int = 1
     confidence_level: str = "95%"
@@ -81,17 +81,17 @@ class JohansenBuilder:
     def __call__(self, log_prices: pd.DataFrame) -> list[SpreadCandidate]:
         symbols = self.symbols or closest_basket(np.exp(log_prices), self.basket_size)
         prices = log_prices[symbols]
-        result = johansen(prices, lag_differences=self.lag_differences)
+        result = basket_cointegration_test(prices, lag_differences=self.lag_differences)
         rank = result.rank(self.confidence_level)
         candidates = []
         for index in range(rank):
             weights = result.vectors.iloc[:, index]
             intercept = float((prices.to_numpy() @ weights.to_numpy()).mean())
-            spread = Spread(weights, intercept, name=f"Johansen beta{index + 1}")
-            half_life = fit_ornstein_uhlenbeck(spread.values(prices)).half_life
+            spread = Spread(weights, intercept, name=f"Basket spread {index + 1} ({'/'.join(symbols)})")
+            half_life = fit_mean_reversion(spread.values(prices)).half_life
             if not _half_life_in_range(half_life, 1.0, self.max_half_life):
                 continue
-            # No p-value for Johansen: report critical value / statistic (below 1 = significant).
+            # The basket test has no p-value: report critical value / statistic (below 1 = significant).
             margin = result.critical_value(index, self.confidence_level) / result.trace_statistics[index]
             candidates.append(SpreadCandidate(spread, float(margin), half_life,
                                               {"eigenvalue": float(result.eigenvalues[index]), "rank": rank}))
@@ -120,9 +120,9 @@ class FactorBuilder:
             intercept = float((prices.to_numpy() @ weights.to_numpy()).mean())
             spread = Spread(weights, intercept, name=f"{symbol} vs factors")
             values = spread.values(prices)
-            # Count the factors as extra series, like an Engle-Granger regression.
-            test = augmented_dickey_fuller(values, series_count=min(1 + self.factor_count, 6))
-            half_life = fit_ornstein_uhlenbeck(values).half_life
+            # Count the factors as extra series, like the pair test's regression.
+            test = stationarity_test(values, series_count=min(1 + self.factor_count, 6))
+            half_life = fit_mean_reversion(values).half_life
             if test.p_value > self.max_p_value or not _half_life_in_range(half_life, 1.0, self.max_half_life):
                 continue
             candidates.append(SpreadCandidate(spread, test.p_value, half_life, {"statistic": test.statistic}))

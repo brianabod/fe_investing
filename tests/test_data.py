@@ -52,6 +52,15 @@ class TestStockAndPortfolio(unittest.TestCase):
         self.assertEqual(portfolio.symbols, ["AAA", "BBB"])
 
 
+    def test_more_stocks_than_palette_colors(self):
+        dates = pd.bdate_range("2024-01-01", periods=10)
+        symbols = [f"S{index:02d}" for index in range(10)]
+        for symbol in symbols:
+            write_price_csv(os.path.join(self.directory.name, f"{symbol}.csv"), dates, np.arange(10) + 20.0)
+        portfolio = Portfolio.from_directory(self.directory.name, symbols)
+        self.assertEqual(len(portfolio.prices().columns), 10)
+
+
 class TestTimeFunctions(unittest.TestCase):
     def test_function_of_time(self):
         outputs, times = function_of_time([1, 2, 3, 4], mean, 2, ["a", "b", "c", "d"])

@@ -9,7 +9,7 @@ the mean. Each round trip earns about ``threshold``, so
 A higher threshold earns more per trade but trades less often. Three ways to
 estimate the trade frequency:
 
-- "parametric": spread modeled as i.i.d. Gaussian, frequency = 1 - Phi(threshold).
+- "parametric": spread modeled as i.i.d. Gaussian noise, frequency = 1 - Phi(threshold).
 - "nonparametric": the share of days beyond the threshold (10.23), smoothed
   with a difference penalty (10.24)-(10.27). The smoothing strength (lambda)
   is chosen by generalized cross-validation.
@@ -39,7 +39,7 @@ class ThresholdResult:
 
 
 def parametric_threshold(standardized_spread, thresholds=DEFAULT_THRESHOLDS) -> ThresholdResult:
-    """White-Gaussian-noise model (Example 10.5)."""
+    """White Gaussian noise model (Example 10.5)."""
     values = np.asarray(standardized_spread, dtype=float)
     frequency = 1 - norm.cdf((thresholds - values.mean()) / values.std())
     profit = thresholds * len(values) * frequency

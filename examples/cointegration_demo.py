@@ -2,8 +2,8 @@
 
 Two log-price series share one random-walk trend. Each one is non-stationary
 (integrated of order 1), but their first differences are stationary, and so
-is their spread: they are cointegrated. The Engle-Granger and ADF tests
-confirm this.
+is their spread: they are cointegrated. The stationarity and pair
+cointegration tests confirm this.
 """
 
 import sys
@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from investing.cointegration import augmented_dickey_fuller, engle_granger
+from investing.cointegration import stationarity_test, pair_cointegration_test
 from investing.market_simulation import generate_cointegrated_time_series
 from investing.plotting import (
     INK_PRIMARY,
@@ -39,11 +39,11 @@ if __name__ == "__main__":
     # Each series is a random walk, but the spread between them is stationary.
     pair = pd.DataFrame({"first": first, "second": second})
     for name in pair:
-        test = augmented_dickey_fuller(pair[name])
+        test = stationarity_test(pair[name])
         print(f"ADF {name}: statistic={test.statistic:.2f}, p-value={test.p_value:.3f} "
               f"-> {'stationary' if test.is_stationary() else 'random walk'}")
-    result = engle_granger(pair)
-    print(f"Engle-Granger: hedge ratio={result.hedge_ratios.iloc[0]:.3f}, "
+    result = pair_cointegration_test(pair)
+    print(f"Pair cointegration test: hedge ratio={result.hedge_ratios.iloc[0]:.3f}, "
           f"statistic={result.statistic:.2f}, p-value={result.p_value:.4f} "
           f"-> {'cointegrated' if result.is_cointegrated() else 'not cointegrated'}")
 
@@ -72,7 +72,7 @@ if __name__ == "__main__":
     draw_zero_axis(difference_ax)
 
     spread_deviation = result.residuals.std()
-    spread_ax.plot(time, result.residuals, color=INK_PRIMARY, linewidth=0.8, label="Engle-Granger spread")
+    spread_ax.plot(time, result.residuals, color=INK_PRIMARY, linewidth=0.8, label="Spread")
     for level in (spread_deviation, -spread_deviation):
         spread_ax.axhline(level, color=INK_SECONDARY, linewidth=1.0, linestyle=(0, (4, 3)))
     spread_ax.plot([], [], color=INK_SECONDARY, linewidth=1.0, linestyle=(0, (4, 3)),
@@ -83,5 +83,5 @@ if __name__ == "__main__":
     spread_ax.set_xlabel("Time step")
 
     add_figure_legend(fig)
-    set_figure_title(fig, f"Cointegration: Engle-Granger p-value {result.p_value:.4f}")
+    set_figure_title(fig, f"Cointegration: pair test p-value {result.p_value:.4f}")
     plt.show()

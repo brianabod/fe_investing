@@ -2,13 +2,13 @@ import unittest
 
 import numpy as np
 
-from investing.mean_reversion import KalmanSpreadFilter, fit_ornstein_uhlenbeck
+from investing.mean_reversion import KalmanSpreadFilter, fit_mean_reversion
 from synthetic_data import autoregressive
 
 
 class TestMeanReversion(unittest.TestCase):
     def test_half_life(self):
-        self.assertAlmostEqual(fit_ornstein_uhlenbeck(autoregressive(5000, 0.5, seed=4)).half_life, 1.0, delta=0.1)
+        self.assertAlmostEqual(fit_mean_reversion(autoregressive(5000, 0.5, seed=4)).half_life, 1.0, delta=0.1)
 
     def test_kalman_filter_removes_noise(self):
         hidden = autoregressive(3000, 0.9, scale=0.01, seed=5)

@@ -73,7 +73,7 @@ class Stock:
         return TimeSeries(pd.DataFrame({Stock.DATE: times, metric: volatilities}), Stock.DATE)
 
     def fit_cauchy(self, metric: str):
-        """Maximum-likelihood Cauchy (location, scale) for a return column."""
+        """Fit a Cauchy distribution (heavy-tailed) to a return column; returns (location, scale)."""
         values = self.time_series.df[metric]
         return cauchy.fit(values[np.isfinite(values)])
 

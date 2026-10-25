@@ -13,12 +13,15 @@ keep them moving around common stochastic trends. This differs from
 covariance, which only measures the tendency to move together at each time
 step. The cointegrating spread is what a statistical arbitrage strategy trades.
 
-- ``augmented_dickey_fuller``: tests whether one series is a random walk, eq. (10.22).
-- ``engle_granger``: two-step test. Regress one log-price on the others with
-  least squares (10.16), then ADF-test the residuals (10.19).
-- ``johansen``: rank test on the VECM matrix Pi = alpha beta^T (2.49)-(2.55).
-  It works for more than two stocks and returns every cointegrating vector.
-- ``mean_crossing_rate``: the quick mean-reversion check from Sec. 10.3.2.
+- ``stationarity_test``: does a single series drift like a random walk, or
+  keep returning to a level? (augmented Dickey-Fuller test, eq. 10.22)
+- ``pair_cointegration_test``: does a pair of stocks have a stationary spread?
+  Regress one log-price on the other, then test the leftover spread for
+  stationarity (Engle & Granger's two-step method, 10.16-10.19).
+- ``basket_cointegration_test``: how many independent stationary spreads
+  does a basket of stocks have, and what are their weights? (Johansen's rank
+  test on the VECM matrix Pi = alpha beta^T, 2.49-2.55)
+- ``mean_crossing_rate``: a quick mean-reversion check (Sec. 10.3.2).
 
 Trend options: "none", "constant", or "linear" (constant + time trend).
 """
@@ -30,22 +33,22 @@ import pandas as pd
 from scipy.linalg import eigh
 
 from .critical_values import (
-    JOHANSEN_LEVELS,
-    JOHANSEN_MAXIMUM_EIGENVALUE,
-    JOHANSEN_TRACE,
+    BASKET_CONFIDENCE_LEVELS,
+    BASKET_MAXIMUM_EIGENVALUE_CRITICAL_VALUES,
+    BASKET_TRACE_CRITICAL_VALUES,
     MAXIMUM_SERIES,
-    dickey_fuller_critical_values,
-    dickey_fuller_p_value,
+    stationarity_critical_values,
+    stationarity_p_value,
 )
 from .regression import deterministic_terms, least_squares
 
 _TREND_TERM_COUNT = {"none": 0, "constant": 1, "linear": 2}
 
 
-# --- Augmented Dickey-Fuller -------------------------------------------------
+# --- Single-series stationarity -------------------------------------------------
 
 @dataclass
-class DickeyFullerResult:
+class StationarityResult:
     statistic: float
     p_value: float
     lag_count: int
@@ -57,7 +60,7 @@ class DickeyFullerResult:
         return self.statistic < self.critical_values[level]
 
 
-def _dickey_fuller_design(values: np.ndarray, lag_count: int):
+def _stationarity_regression(values: np.ndarray, lag_count: int):
     """Target dx_t and regressors [x_{t-1}, dx_{t-1}, ..., dx_{t-lag_count}]."""
     differences = np.diff(values)
     target = differences[lag_count:]
@@ -66,23 +69,25 @@ def _dickey_fuller_design(values: np.ndarray, lag_count: int):
     return target, np.column_stack(columns)
 
 
-def augmented_dickey_fuller(
+def stationarity_test(
     values,
     trend: str = "constant",
     max_lags: int | None = None,
     choose_lags: bool = True,
     series_count: int = 1,
     critical_value_trend: str | None = None,
-) -> DickeyFullerResult:
-    """Augmented Dickey-Fuller test of H0: the series has a unit root (is a random walk).
+) -> StationarityResult:
+    """Test H0: the series has a unit root (is a random walk). This is the
+    augmented Dickey-Fuller test.
 
     Fits  dx_t = phi0 + c0*t + phi1*x_{t-1} + sum_i phi_{i+1} dx_{t-i} + e_t  (10.22)
     and returns the t-statistic of phi1 (10.21). With ``choose_lags`` the
-    number of lagged differences is picked by AIC on a common sample, the
-    same way statsmodels does it.
+    number of lagged differences is picked by an information criterion on a
+    common sample, the same way statsmodels does it.
 
-    ``series_count`` and ``critical_value_trend`` are only for residual tests
-    such as Engle-Granger, which need different critical values.
+    ``series_count`` and ``critical_value_trend`` are only for testing a
+    regression's residuals (as the pair test does), which needs different
+    critical values.
     """
     values = np.asarray(values, dtype=float)
     count = len(values)
@@ -93,37 +98,37 @@ def augmented_dickey_fuller(
 
     lag_count = max_lags
     if choose_lags and max_lags > 0:
-        target, regressors = _dickey_fuller_design(values, max_lags)
+        target, regressors = _stationarity_regression(values, max_lags)
         full = np.column_stack([deterministic_terms(len(target), trend), regressors])
         best_criterion = np.inf
         for lags in range(max_lags + 1):
             fit = least_squares(target, full[:, : trend_terms + 1 + lags])
-            if fit.akaike_information_criterion < best_criterion:
-                best_criterion, lag_count = fit.akaike_information_criterion, lags
+            if fit.information_criterion < best_criterion:
+                best_criterion, lag_count = fit.information_criterion, lags
 
-    target, regressors = _dickey_fuller_design(values, lag_count)
+    target, regressors = _stationarity_regression(values, lag_count)
     fit = least_squares(target, np.column_stack([regressors, deterministic_terms(len(target), trend)]))
     statistic = float(fit.t_values[0])
 
     table_trend = critical_value_trend or trend
     if table_trend == "none":
-        table_trend = "constant"  # MacKinnon's no-constant surface isn't tabulated here
+        table_trend = "constant"  # the no-constant table isn't included here
     table_count = len(target) if series_count == 1 else count - 1
-    return DickeyFullerResult(
+    return StationarityResult(
         statistic=statistic,
-        p_value=dickey_fuller_p_value(statistic, series_count, table_trend),
+        p_value=stationarity_p_value(statistic, series_count, table_trend),
         lag_count=lag_count,
         observation_count=len(target),
-        critical_values=dickey_fuller_critical_values(series_count, table_trend, table_count),
+        critical_values=stationarity_critical_values(series_count, table_trend, table_count),
         level_coefficient=float(fit.coefficients[0]),
     )
 
 
-# --- Engle-Granger -------------------------------------------------------------
+# --- Pair cointegration (regression, then stationarity test) ---------------------
 
 @dataclass
-class EngleGrangerResult:
-    """Result of regressing ``dependent`` on the other stocks.
+class PairCointegrationResult:
+    """Result of regressing ``dependent`` on the other stock(s).
 
     ``weights`` are the cointegrating weights on log-prices, normalized so the
     dependent stock has weight 1: spread_t = weights . y_t - intercept
@@ -133,16 +138,16 @@ class EngleGrangerResult:
     weights: pd.Series
     intercept: float
     trend_coefficient: float
-    dickey_fuller: DickeyFullerResult
+    residual_test: StationarityResult
     residuals: pd.Series
 
     @property
     def statistic(self) -> float:
-        return self.dickey_fuller.statistic
+        return self.residual_test.statistic
 
     @property
     def p_value(self) -> float:
-        return self.dickey_fuller.p_value
+        return self.residual_test.p_value
 
     @property
     def hedge_ratios(self) -> pd.Series:
@@ -150,26 +155,32 @@ class EngleGrangerResult:
         return -self.weights.drop(self.dependent)
 
     def is_cointegrated(self, level: str = "5%") -> bool:
-        return self.dickey_fuller.is_stationary(level)
+        return self.residual_test.is_stationary(level)
 
 
-def engle_granger(
+def pair_cointegration_test(
     log_prices: pd.DataFrame,
     dependent: str | None = None,
     trend: str = "constant",
     max_lags: int | None = None,
-) -> EngleGrangerResult:
-    """Engle-Granger two-step cointegration test.
+) -> PairCointegrationResult:
+    """Two-step cointegration test for a pair of stocks (Engle & Granger's method).
 
-    Step 1: least squares  y1 = mu (+ c0*t) + gamma . y_others + eps   (10.16)
-    Step 2: ADF test on the residuals with Engle-Granger critical values.
-            The regression already removed the mean, so the residual test
-            has no constant; the critical values account for that.
+    Step 1: least squares  y1 = mu (+ c0*t) + gamma . y2 + eps   (10.16)
+    Step 2: stationarity test on the residuals (the spread), with critical
+            values adjusted for the fact that gamma was estimated.
+
+    The result depends on which stock is regressed on the other (Remark
+    10.4). With ``dependent=None`` both orders are tried and the stronger
+    result is returned; name a ``dependent`` stock to fix the order. More
+    than two stocks also work: the first is regressed on all the others.
 
     ``trend="linear"`` allows cointegration with a deterministic trend (Example 10.2).
     """
+    if dependent is None:
+        results = [pair_cointegration_test(log_prices, symbol, trend, max_lags) for symbol in log_prices.columns]
+        return min(results, key=lambda result: result.statistic)
     symbols = list(log_prices.columns)
-    dependent = dependent or symbols[0]
     others = [symbol for symbol in symbols if symbol != dependent]
     target = log_prices[dependent].to_numpy(float)
     regressors = np.column_stack([deterministic_terms(len(target), trend),
@@ -178,32 +189,24 @@ def engle_granger(
     trend_terms = _TREND_TERM_COUNT[trend]
     hedge_ratios = fit.coefficients[trend_terms:]
 
-    residual_test = augmented_dickey_fuller(
+    residual_test = stationarity_test(
         fit.residuals, trend="none", max_lags=max_lags,
         series_count=len(symbols), critical_value_trend=trend,
     )
-    return EngleGrangerResult(
+    return PairCointegrationResult(
         dependent=dependent,
         weights=pd.Series(np.r_[1.0, -hedge_ratios], index=[dependent] + others),
         intercept=float(fit.coefficients[0]),
         trend_coefficient=float(fit.coefficients[1]) if trend == "linear" else 0.0,
-        dickey_fuller=residual_test,
+        residual_test=residual_test,
         residuals=pd.Series(fit.residuals, index=log_prices.index, name="residual"),
     )
 
 
-def engle_granger_strongest(log_prices: pd.DataFrame, **kwargs) -> EngleGrangerResult:
-    """Run Engle-Granger with each stock as the dependent one and keep the
-    strongest result. The test depends on regression order (Remark 10.4), so
-    trying every order makes it more robust."""
-    results = [engle_granger(log_prices, dependent=symbol, **kwargs) for symbol in log_prices.columns]
-    return min(results, key=lambda result: result.statistic)
-
-
-# --- Johansen ------------------------------------------------------------------
+# --- Basket cointegration (rank test) ----------------------------------------------
 
 @dataclass
-class JohansenResult:
+class BasketCointegrationResult:
     eigenvalues: np.ndarray
     vectors: pd.DataFrame                   # columns = cointegrating vectors beta_i, strongest first
     trace_statistics: np.ndarray
@@ -214,7 +217,7 @@ class JohansenResult:
     symbols: list[str] = field(default_factory=list)
 
     def critical_value(self, rank: int, level: str = "95%") -> float:
-        return float(self.trace_critical_values[rank, JOHANSEN_LEVELS.index(level)])
+        return float(self.trace_critical_values[rank, BASKET_CONFIDENCE_LEVELS.index(level)])
 
     def rank(self, level: str = "95%") -> int:
         """Number of cointegrating relations by the sequential trace test."""
@@ -224,8 +227,9 @@ class JohansenResult:
         return len(self.trace_statistics)
 
 
-def johansen(log_prices: pd.DataFrame, lag_differences: int = 1) -> JohansenResult:
-    """Johansen cointegration test with an unrestricted constant.
+def basket_cointegration_test(log_prices: pd.DataFrame, lag_differences: int = 1) -> BasketCointegrationResult:
+    """Cointegration rank test for a basket of stocks (Johansen's method),
+    with an unrestricted constant.
 
     Fits the VECM  r_t = phi0 + Pi y_{t-1} + sum_j Phi_j r_{t-j} + w_t   (2.49)
     by reduced-rank regression. The eigenvectors give beta in Pi = alpha beta^T
@@ -275,15 +279,15 @@ def johansen(log_prices: pd.DataFrame, lag_differences: int = 1) -> JohansenResu
 
     trace = np.array([-count * np.sum(np.log(1 - eigenvalues[rank:])) for rank in range(series_count)])
     maximum_eigenvalue = -count * np.log(1 - eigenvalues)
-    return JohansenResult(
+    return BasketCointegrationResult(
         eigenvalues=eigenvalues,
         vectors=pd.DataFrame(eigenvectors, index=log_prices.columns,
                              columns=[f"beta{index + 1}" for index in range(series_count)]),
         trace_statistics=trace,
-        trace_critical_values=np.array([JOHANSEN_TRACE[series_count - rank - 1]
+        trace_critical_values=np.array([BASKET_TRACE_CRITICAL_VALUES[series_count - rank - 1]
                                         for rank in range(series_count)]),
         maximum_eigenvalue_statistics=maximum_eigenvalue,
-        maximum_eigenvalue_critical_values=np.array([JOHANSEN_MAXIMUM_EIGENVALUE[series_count - rank - 1]
+        maximum_eigenvalue_critical_values=np.array([BASKET_MAXIMUM_EIGENVALUE_CRITICAL_VALUES[series_count - rank - 1]
                                                      for rank in range(series_count)]),
         lag_differences=lag_differences,
         symbols=list(log_prices.columns),
