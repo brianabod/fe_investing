@@ -19,7 +19,7 @@ import pandas as pd
 
 from .cointegration import augmented_dickey_fuller, engle_granger_strongest, johansen
 from .mean_reversion import fit_ornstein_uhlenbeck
-from .pair_selection import normalized_price_distance, principal_component_factor_model
+from .pair_selection import closest_basket, normalized_price_distance, principal_component_factor_model
 from .spread import Spread
 
 
@@ -75,10 +75,12 @@ class JohansenBuilder:
     lag_differences: int = 1
     confidence_level: str = "95%"
     max_half_life: float = 60.0
-    symbols: list[str] | None = None
+    symbols: list[str] | None = None    # fixed basket; None = choose one per fitting window
+    basket_size: int = 3                # stocks to choose when ``symbols`` is None
 
     def __call__(self, log_prices: pd.DataFrame) -> list[SpreadCandidate]:
-        prices = log_prices[self.symbols] if self.symbols else log_prices
+        symbols = self.symbols or closest_basket(np.exp(log_prices), self.basket_size)
+        prices = log_prices[symbols]
         result = johansen(prices, lag_differences=self.lag_differences)
         rank = result.rank(self.confidence_level)
         candidates = []

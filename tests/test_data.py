@@ -36,12 +36,20 @@ class TestStockAndPortfolio(unittest.TestCase):
         self.assertAlmostEqual(rolling[Stock.RETURN].iloc[-1], stock.time_series.df[Stock.RETURN].iloc[-3:].mean())
 
     def test_portfolio_aligns_by_date(self):
-        portfolio = Portfolio.from_directory(["AAA", "BBB"], self.directory.name)
+        portfolio = Portfolio.from_directory(self.directory.name, ["AAA", "BBB"])
         prices = portfolio.prices()
         self.assertEqual(len(prices), 8)
         self.assertFalse(prices.isna().any().any())
         returns = portfolio.metrics[Stock.RETURN].df
         self.assertFalse(returns[Stock.DATE].isna().any())
+
+
+    def test_discovers_files_and_skips_sparse_ones(self):
+        dates = pd.bdate_range("2024-01-01", periods=10)
+        write_price_csv(os.path.join(self.directory.name, "CCC.csv"), dates[:3], [1.0, 2.0, 3.0])
+        with self.assertWarns(UserWarning):
+            portfolio = Portfolio.from_directory(self.directory.name, minimum_days=5)
+        self.assertEqual(portfolio.symbols, ["AAA", "BBB"])
 
 
 class TestTimeFunctions(unittest.TestCase):

@@ -64,10 +64,8 @@ To use the package from another project:
 `pip install git+https://github.com/brianabod/fe_investing.git`, then
 `import investing`.
 
-Price data is not stored in the repository. Download daily CSVs from Yahoo
-Finance (columns `Date,Open,High,Low,Close,Adj Close,Volume`) into
-`data/defense/`, e.g. `data/defense/LMT.csv`. The examples use LMT, NOC, GD,
-BA and LDOS. The unit tests use synthetic data and need no downloads.
+Price data is not stored in the repository; see [Data](#data). The unit tests
+use synthetic data and need no downloads.
 
 ## Quick start
 
@@ -78,6 +76,13 @@ BA and LDOS. The unit tests use synthetic data and need no downloads.
 .venv/bin/python -m unittest discover tests         # unit tests
 ```
 
+By default the examples load every CSV in `data/`. Use `--symbols` to pick a
+subset, or `--data-directory` to point at another folder:
+
+```bash
+.venv/bin/python examples/statistical_arbitrage.py --symbols AAA BBB CCC
+```
+
 The examples can be run from any directory. Each one adds the repo folder to
 Python's search path so `import investing` works without installing anything.
 
@@ -85,9 +90,9 @@ Python's search path so `import investing` works without installing anything.
 
 ```
 investing/            the package
-examples/             runnable scripts, one per step above
+examples/             runnable scripts, one per step above, plus shared command-line options
 tests/                unit tests (synthetic data only)
-data/defense/         daily price CSVs (not in git)
+data/                 daily price CSVs, one per stock (not in git)
 requirements.txt
 pyproject.toml        makes the repo pip-installable
 ```
@@ -99,12 +104,12 @@ pyproject.toml        makes the repo pip-installable
 | `time_series.py` | `TimeSeries` (a DataFrame with a date column, oldest first), `mean`, `volatility`, `function_of_time` (sliding-window statistics) | — |
 | `stock.py` | `Stock`: one CSV, adjusted prices, close-to-close `Return` and `Log-Return`, distribution plots | — |
 | `portfolio.py` | `Portfolio`: stocks matched by date. `prices()` and `log_prices()` feed the statistical arbitrage code; also exploratory plots | — |
-| `plotting.py` | Shared plots: Gaussian/Cauchy curves, spread trading chart, threshold curves, equity curves | Figs. 10.6, 10.10-10.12 |
+| `plotting.py` | Shared chart style (`apply_style`, color-blind-safe `series_color`), Gaussian/Cauchy curves, spread trading chart, threshold curves, equity curves | Figs. 10.6, 10.10-10.12 |
 | `market_simulation.py` | `generate_cointegrated_time_series`: synthetic pairs with a known hedge ratio | 10.1 |
 | `regression.py` | `least_squares` and trend terms shared by the tests and models | — |
 | `critical_values.py` | MacKinnon critical-value and p-value tables | — |
 | `cointegration.py` | `augmented_dickey_fuller`, `engle_granger`, `engle_granger_strongest`, `johansen`, `mean_crossing_rate` | 10.3, 2.6 |
-| `pair_selection.py` | `normalized_price_distance`, principal-component factor model, `rank_pairs` | 10.2 |
+| `pair_selection.py` | `normalized_price_distance`, principal-component factor model, `rank_pairs`, `closest_basket` | 10.2 |
 | `spread.py` | `Spread` (weighted log-prices), `standardize` | 10.3 |
 | `mean_reversion.py` | `OrnsteinUhlenbeck` (half-life, reversion speed), `KalmanSpreadFilter` (fitted with EM) | 10.4.2 |
 | `threshold.py` | Optimal entry threshold: parametric, smoothed nonparametric, or by replaying the rule | 10.4.1 |
@@ -119,7 +124,7 @@ statistics and p-values match statsmodels to within rounding error.
 ```python
 from investing import PairsBuilder, Portfolio, TradingRule, performance_summary, walk_forward
 
-portfolio = Portfolio.from_directory(["LMT", "NOC", "GD", "BA", "LDOS"], "data/defense")
+portfolio = Portfolio.from_directory("data")  # every CSV in data/, or pass symbols=[...]
 result = walk_forward(
     portfolio.prices(),
     PairsBuilder(max_spreads=3),
@@ -157,26 +162,28 @@ forward and repeats.
 - **Capital:** split equally across the builder's `max_spreads` slots. An
   unused slot sits in cash.
 
-## Results on the defense stocks (2006–2024, 5 basis point costs)
+## What to expect
 
-| Strategy | Annual return | Sharpe ratio | Max drawdown |
-|---|---|---|---|
-| Pairs (Engle-Granger) | +0.2% | 0.07 | −19% |
-| Johansen basket (LMT/NOC/GD) | −0.5% | −0.10 | −24% |
-| Factor residuals (1 principal component) | −0.1% | −0.13 | −3% |
-
-The strategy roughly breaks even out-of-sample. Spreads fitted and traded on
-the same year look highly profitable, which shows how much in-sample results
-overstate performance. Five stocks give only 10 possible pairs, so the
-strategy rarely has a strong spread to trade. A larger universe is the
-obvious next step.
+On a small universe of a handful of related stocks, the strategy roughly
+breaks even out-of-sample after costs. Spreads fitted and traded on the same
+year look highly profitable, which shows how much in-sample results overstate
+performance. A few stocks give only a few possible pairs, so the strategy
+rarely has a strong spread to trade. A larger universe is the obvious next
+step.
 
 ## Data
 
-The results above use Yahoo Finance daily data for BA, GD, LDOS, LMT and NOC
-through 2024-02-02. `data/` is ignored by git. To add stocks, save CSVs in
-the same format and load them with
-`Portfolio.from_directory(symbols, directory)`.
+Price data lives in the local `data/` folder, which git ignores. Save one
+daily CSV per stock, named `<SYMBOL>.csv`, in Yahoo Finance's format:
+
+```
+Date,Open,High,Low,Close,Adj Close,Volume
+```
+
+`Portfolio.from_directory("data")` loads every CSV it finds, sorted by name.
+It skips files with less than a year of valid prices (with a warning) and
+keeps only the dates all stocks share. Pass `symbols=[...]` to load specific
+files.
 
 ## References
 
@@ -199,3 +206,8 @@ https://palomar.home.ece.ust.hk/papers/2016/Feng&Palomar-FnT2016.pdf
 - **Prices and returns:** prices are adjusted closes, and returns are
   close-to-close. Multi-stock tables keep only dates every stock traded on.
 - **Window lengths:** counted in trading days, with 252 per year.
+- **Charts:** call `investing.plotting.apply_style()` before plotting.
+  - Stocks take palette colors in portfolio order and keep them on every chart.
+  - Each figure has one shared legend below the plots, and every panel has a
+    left-aligned title.
+  - Returns are shown as percentages.

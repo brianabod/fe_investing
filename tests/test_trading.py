@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from investing import PairsBuilder, compute_positions, performance_summary, walk_forward
+from investing.pair_selection import closest_basket
 from investing.threshold import parametric_threshold, smooth_frequency
 from synthetic_data import common_trend_pair
 
@@ -22,6 +23,15 @@ class TestThreshold(unittest.TestCase):
         spread = np.array([0, 1.5, 2.1, 1.0, -0.1, -2.5, -1.0, 0.2, 5.0, 1.0])
         positions = compute_positions(spread, entry_threshold=2.0, stop_loss=4.0)
         np.testing.assert_array_equal(positions, [0, 0, -1, -1, 0, 1, 1, 0, 0, 0])
+
+
+class TestSelection(unittest.TestCase):
+    def test_closest_basket_prefers_related_stocks(self):
+        prices = np.exp(common_trend_pair(count=500))
+        generator = np.random.default_rng(7)
+        prices["C"] = np.exp(np.cumsum(generator.normal(0, 0.03, len(prices))))  # unrelated
+        prices["D"] = prices["B"] * np.exp(generator.normal(0, 0.002, len(prices)))  # tracks B
+        self.assertEqual(sorted(closest_basket(prices, 3)), ["A", "B", "D"])
 
 
 class TestBacktest(unittest.TestCase):

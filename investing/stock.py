@@ -77,33 +77,15 @@ class Stock:
         values = self.time_series.df[metric]
         return cauchy.fit(values[np.isfinite(values)])
 
-    def plot_time_series(self, ax, metric, label=None, legend=False, alpha=0.7, kwargs_overrides=None):
-        plot_kwargs = {
-            "label": self.company,
-            "xlabel": Stock.DATE,
-            "ylabel": f"{metric if label is None else label} ({Stock.UNITS})",
-            "alpha": alpha,
-            "legend": legend,
-            "color": self.color,
-            "grid": True,
-        }
-        plot_kwargs.update(kwargs_overrides or {})
-        return self.time_series.plot(metric, ax, plot_kwargs)
+    def plot_time_series(self, ax, metric, **line_kwargs):
+        """Line of one column over time, labeled with the company and drawn in the stock's color."""
+        line_kwargs = {"label": self.company, "color": self.color, **line_kwargs}
+        return self.time_series.plot(metric, ax, **line_kwargs)
 
-    def plot_distribution(self, ax, column=RETURN, label=None, units=UNITS, kwargs_overrides=None):
-        label = column if label is None else label
+    def plot_distribution(self, ax, column=RETURN, value_range=(-0.1, 0.1), bins=160, **hist_kwargs):
+        """Density histogram of a return column within ``value_range``."""
         values = self.time_series.df[column]
         values = values[np.isfinite(values)]
-        legend_label = rf"{self.company} ($\mu$={values.mean():.3f}, $\sigma$={values.std():.3f})"
-        return values.plot.hist(
-            ax=ax,
-            bins=500,
-            density=True,
-            xlabel=f"{label} ({units})",
-            ylabel="Density",
-            label=legend_label,
-            alpha=0.7,
-            grid=True,
-            color=self.color,
-            **(kwargs_overrides or {}),
-        )
+        hist_kwargs = {"color": self.color, "alpha": 0.55, "histtype": "stepfilled",
+                       "linewidth": 0, "label": self.company, **hist_kwargs}
+        return ax.hist(values, bins=bins, range=value_range, density=True, **hist_kwargs)

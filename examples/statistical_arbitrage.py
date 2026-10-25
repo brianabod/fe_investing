@@ -1,4 +1,4 @@
-"""Statistical arbitrage on the defense stocks (Feng & Palomar, Ch. 10).
+"""Statistical arbitrage on the stocks in the data folder (Feng & Palomar, Ch. 10).
 
 1. Rank pairs (Sec. 10.2) and test them for cointegration (10.3) on the most
    recent year.
@@ -6,6 +6,8 @@
    spread, positions and in-sample profit (Figs. 10.6 / 10.10 / 10.12).
 3. Walk-forward, out-of-sample backtest with costs for pairs, Johansen
    baskets and factor-residual spreads (10.5).
+
+Usage:  python examples/statistical_arbitrage.py [--data-directory DIR] [--symbols A B C]
 """
 
 import sys
@@ -17,12 +19,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from command_line import load_portfolio, parse_arguments
 from investing import (
     FactorBuilder,
     JohansenBuilder,
     KalmanSpreadFilter,
     PairsBuilder,
-    Portfolio,
     Spread,
     TradingRule,
     compute_positions,
@@ -36,11 +38,11 @@ from investing import (
     standardize,
     walk_forward,
 )
-from investing.plotting import plot_equity_curves, plot_spread_trading, plot_threshold_curves
+from investing.plotting import apply_style, plot_equity_curves, plot_spread_trading, plot_threshold_curves
+from investing.pair_selection import closest_basket
 from investing.threshold import THRESHOLD_METHODS, simulate_round_trips
 
-DATA_DIRECTORY = Path(__file__).resolve().parents[1] / "data" / "defense"
-SYMBOLS = ["LMT", "NOC", "GD", "BA", "LDOS"]  # ^RTX.csv is mostly empty
+BASKET_SIZE = 3         # stocks in each Johansen basket
 FITTING_DAYS = 252      # days used to fit each model
 TRADING_DAYS = 126      # days each fitted model is traded out-of-sample
 COST_BASIS_POINTS = 5.0 # per $1 of gross exposure traded
@@ -71,8 +73,9 @@ def analyze_recent(prices: pd.DataFrame):
     tests = pd.DataFrame(rows).sort_values("p_value", ignore_index=True)
     print(tests.drop(columns="result").to_string(index=False, float_format="%.3f"))
 
-    print("\n== Johansen test (LMT, NOC, GD) ==")
-    basket = johansen(log_prices[["LMT", "NOC", "GD"]])
+    symbols = closest_basket(recent, BASKET_SIZE)
+    print(f"\n== Johansen test ({', '.join(symbols)}: the {len(symbols)} most closely related stocks) ==")
+    basket = johansen(log_prices[symbols])
     for rank, statistic in enumerate(basket.trace_statistics):
         print(f"  H0: rank <= {rank}: trace={statistic:.2f}  5% critical value={basket.critical_value(rank):.2f}")
     print(f"  cointegration rank at 95%: {basket.rank()}")
@@ -96,8 +99,8 @@ def plot_best_pair(recent: pd.DataFrame, result):
     print(f"\nBest pair in-sample: entry threshold={entry_threshold:.2f}, {round_trips} round trips")
 
     other = result.hedge_ratios.index[0]
-    title = (f"In-sample: {result.dependent} - {result.hedge_ratios.iloc[0]:.2f}*{other}, "
-             f"threshold={entry_threshold:.2f} (half-life {fit_ornstein_uhlenbeck(values).half_life:.1f} days)")
+    title = (f"In-sample pair trade: {result.dependent} − {result.hedge_ratios.iloc[0]:.2f} × {other}  "
+             f"(entry threshold {entry_threshold:.2f}, half-life {fit_ornstein_uhlenbeck(values).half_life:.1f} days)")
     plot_spread_trading(np.log(recent[[result.dependent, other]]), standardized, entry_threshold,
                         positions, filtered, title)
     plot_threshold_curves(threshold_results)
@@ -106,7 +109,7 @@ def plot_best_pair(recent: pd.DataFrame, result):
 def run_backtests(prices: pd.DataFrame):
     strategies = {
         "Pairs (Engle-Granger)": PairsBuilder(max_spreads=3),
-        "Johansen basket (LMT/NOC/GD)": JohansenBuilder(symbols=["LMT", "NOC", "GD"]),
+        f"Johansen basket ({BASKET_SIZE} most related stocks)": JohansenBuilder(basket_size=BASKET_SIZE),
         "Factor residuals (1 principal component)": FactorBuilder(factor_count=1),
     }
     rule = TradingRule(threshold_method="empirical", stop_loss=4.0)
@@ -124,7 +127,9 @@ def run_backtests(prices: pd.DataFrame):
 
 
 if __name__ == "__main__":
-    prices = Portfolio.from_directory(SYMBOLS, DATA_DIRECTORY).prices()
+    arguments = parse_arguments(__doc__)
+    apply_style()
+    prices = load_portfolio(arguments).prices()
     print(f"{len(prices)} common trading days, {prices.index[0].date()} to {prices.index[-1].date()}")
     recent, best = analyze_recent(prices)
     plot_best_pair(recent, best)

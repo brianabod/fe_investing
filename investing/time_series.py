@@ -78,11 +78,13 @@ class TimeSeries:
         times = self.df[self.time_column].iloc[window_size - 1:]
         return rolled.tolist(), times.tolist()
 
-    def plot(self, column: str, ax=None, plot_kwargs: dict | None = None):
-        kwargs = dict(plot_kwargs or {})
-        if ax is not None:
-            kwargs["ax"] = ax
-        return self.df.plot(x=self.time_column, y=column, **kwargs)
+    def plot(self, column: str, ax=None, **line_kwargs):
+        """Draw one column against time as a line; returns the axes."""
+        import matplotlib.pyplot as plt
+
+        ax = ax if ax is not None else plt.gca()
+        ax.plot(self.df[self.time_column], self.df[column], **line_kwargs)
+        return ax
 
     @staticmethod
     def _from_file(file_path, time_column: str, time_format: str | None) -> pd.DataFrame:

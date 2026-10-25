@@ -17,9 +17,20 @@ import pandas as pd
 
 from investing.cointegration import augmented_dickey_fuller, engle_granger
 from investing.market_simulation import generate_cointegrated_time_series
+from investing.plotting import (
+    INK_PRIMARY,
+    INK_SECONDARY,
+    add_figure_legend,
+    apply_style,
+    draw_zero_axis,
+    series_color,
+    set_figure_title,
+)
 from investing.time_series import function_of_time, mean, volatility, window_time_vector
 
 if __name__ == "__main__":
+    apply_style()
+
     # A pair of time series with an integration order of 1
     count = 1000
     time = list(range(count))
@@ -36,55 +47,41 @@ if __name__ == "__main__":
           f"statistic={result.statistic:.2f}, p-value={result.p_value:.4f} "
           f"-> {'cointegrated' if result.is_cointegrated() else 'not cointegrated'}")
 
-    # Show that the first difference of each time series is stationary
-    time_difference = time[:-1]
-    first_difference = np.diff(first)
-    second_difference = np.diff(second)
-
+    # The first difference of each series is stationary: its rolling mean and
+    # volatility stay flat over time.
     window = 100
+    time_difference = time[1:]
     window_times = window_time_vector(time_difference, window)
-    first_means = function_of_time(first_difference, mean, window)
-    first_volatilities = function_of_time(first_difference, volatility, window)
-    second_means = function_of_time(second_difference, mean, window)
-    second_volatilities = function_of_time(second_difference, volatility, window)
 
-    fig = plt.figure()
-    ax1 = fig.add_subplot(4, 1, 1)
-    ax1.plot(time, first, color="blue", alpha=0.5)
-    ax1.plot(time, second, color="red", alpha=0.5)
-    ax1.grid(True)
-    ax1.set_title("I(1) Time Series Pair")
+    fig, (series_ax, difference_ax, spread_ax) = plt.subplots(
+        3, 1, sharex=True, figsize=(10, 8.5), height_ratios=[1.2, 1, 1])
+    for index, (name, values) in enumerate(pair.items()):
+        color = series_color(index)
+        differences = np.diff(values)
+        means = np.array(function_of_time(differences, mean, window))
+        volatilities = np.array(function_of_time(differences, volatility, window))
 
-    ax2 = fig.add_subplot(4, 1, 2)
-    ax2.plot(time_difference, first_difference, color="blue", alpha=0.2)
-    ax2.plot(time_difference, second_difference, color="red", alpha=0.2)
-    ax2.plot(window_times, first_means, color="blue", alpha=0.7)
-    ax2.plot(window_times, first_volatilities, color="blue", alpha=0.7)
-    ax2.plot(window_times, second_means, color="red", alpha=0.7)
-    ax2.plot(window_times, second_volatilities, color="red", alpha=0.7)
-    ax2.grid(True)
-    ax2.set_title(f"First Difference Mean and Volatility (Window Size: {window})")
+        series_ax.plot(time, values, color=color, linewidth=1.1, label=f"{name.capitalize()} series")
+        difference_ax.plot(time_difference, differences, color=color, linewidth=0.5, alpha=0.35)
+        difference_ax.fill_between(window_times, means - volatilities, means + volatilities,
+                                   color=color, alpha=0.15, linewidth=0)
+        difference_ax.plot(window_times, means, color=color, linewidth=1.4)
 
-    ax3 = fig.add_subplot(4, 1, 3)
-    ax3.plot(time_difference, first_difference, color="blue", alpha=0.2)
-    ax3.plot(time_difference, second_difference, color="red", alpha=0.2)
-    for means, volatilities, color in [(first_means, first_volatilities, "blue"),
-                                       (second_means, second_volatilities, "red")]:
-        upper = [value + spread for value, spread in zip(means, volatilities)]
-        lower = [value - spread for value, spread in zip(means, volatilities)]
-        ax3.plot(window_times, upper, color=color, alpha=0.7)
-        ax3.plot(window_times, means, color=color, alpha=0.7)
-        ax3.plot(window_times, lower, color=color, alpha=0.7)
-    ax3.grid(True)
-    ax3.set_title(f"First Differences, Mean +/- StDev (Window Size: {window})")
+    series_ax.set_title("Two random walks that share a common trend (integrated of order 1)")
+    difference_ax.set_title(f"First differences, with rolling mean ± 1 standard deviation ({window}-step window)")
+    draw_zero_axis(difference_ax)
 
-    ax4 = fig.add_subplot(4, 1, 4)
     spread_deviation = result.residuals.std()
-    ax4.plot(time, result.residuals, color="black", alpha=0.7)
-    ax4.axhline(spread_deviation, color="green")   # sell the spread above
-    ax4.axhline(-spread_deviation, color="green")  # buy the spread below
-    ax4.axhline(0, color="red")                    # unwind at the mean
-    ax4.grid(True)
-    ax4.set_title("Engle-Granger spread (stationary and mean-reverting), +/- 1 standard deviation thresholds")
+    spread_ax.plot(time, result.residuals, color=INK_PRIMARY, linewidth=0.8, label="Engle-Granger spread")
+    for level in (spread_deviation, -spread_deviation):
+        spread_ax.axhline(level, color=INK_SECONDARY, linewidth=1.0, linestyle=(0, (4, 3)))
+    spread_ax.plot([], [], color=INK_SECONDARY, linewidth=1.0, linestyle=(0, (4, 3)),
+                   label="±1 standard deviation thresholds")
+    draw_zero_axis(spread_ax)
+    spread_ax.set_title(f"Spread: first − {result.hedge_ratios.iloc[0]:.2f} × second "
+                        "(stationary and mean-reverting)")
+    spread_ax.set_xlabel("Time step")
 
+    add_figure_legend(fig)
+    set_figure_title(fig, f"Cointegration: Engle-Granger p-value {result.p_value:.4f}")
     plt.show()

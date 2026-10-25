@@ -99,3 +99,21 @@ def rank_pairs(prices: pd.DataFrame, factor_count: int = 2) -> pd.DataFrame:
             "return_correlation": float(log_returns[first].corr(log_returns[second])),
         })
     return pd.DataFrame(rows).sort_values("price_distance", ignore_index=True)
+
+
+def closest_basket(prices: pd.DataFrame, size: int = 3) -> list[str]:
+    """Pick ``size`` stocks that move most closely together: walk the pairs
+    from smallest normalized price distance and collect their stocks until the
+    basket is full. A cheap preselection for multi-stock (Johansen) tests."""
+    if prices.shape[1] <= size:
+        return list(prices.columns)
+    pairs = sorted(combinations(prices.columns, 2),
+                   key=lambda pair: normalized_price_distance(prices, *pair))
+    basket: list[str] = []
+    for pair in pairs:
+        for symbol in pair:
+            if symbol not in basket and len(basket) < size:
+                basket.append(symbol)
+        if len(basket) == size:
+            break
+    return basket

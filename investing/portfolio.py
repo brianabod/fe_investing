@@ -7,12 +7,26 @@ traded on.
 """
 
 import os
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.patches import Patch
+from matplotlib.ticker import FuncFormatter, MultipleLocator
 
-from .plotting import draw_zero_axis, plot_cauchy, plot_gaussian
+from .plotting import (
+    INK_MUTED,
+    INK_PRIMARY,
+    INK_SECONDARY,
+    add_figure_legend,
+    draw_zero_axis,
+    format_percent,
+    plot_cauchy,
+    plot_gaussian,
+    series_color,
+    set_figure_title,
+)
 from .stock import Stock
 from .time_series import TimeSeries
 
@@ -28,6 +42,10 @@ class Portfolio:
         self.stocks = stocks
         self.symbols = [stock.symbol for stock in stocks]
         self.reference_stock: Stock = stocks[0]
+        # Stocks without a color get the next palette slot, in portfolio order.
+        for index, stock in enumerate(stocks):
+            if stock.color is None:
+                stock.color = series_color(index)
         # One table per metric with a column per stock, matched by date.
         self.metrics = {
             metric: TimeSeries(self.aligned(metric).reset_index(), Stock.DATE)
@@ -35,15 +53,30 @@ class Portfolio:
         }
 
     @classmethod
-    def from_directory(cls, symbols: list[str], directory, companies: dict | None = None,
-                       colors: dict | None = None) -> "Portfolio":
-        """Load ``<directory>/<SYMBOL>.csv`` for each symbol."""
+    def from_directory(cls, directory, symbols: list[str] | None = None, companies: dict | None = None,
+                       colors: dict | None = None, minimum_days: int = 252) -> "Portfolio":
+        """Load ``<directory>/<SYMBOL>.csv`` for each symbol.
+
+        With no ``symbols``, every CSV in the directory is loaded, sorted by
+        name. Discovered files with fewer than ``minimum_days`` valid prices
+        are skipped with a warning, since one sparse file would shrink every
+        date-aligned table to almost nothing.
+        """
         companies, colors = companies or {}, colors or {}
-        stocks = [
-            Stock(symbol, os.path.join(directory, f"{symbol}.csv"),
-                  company=companies.get(symbol), color=colors.get(symbol))
-            for symbol in symbols
-        ]
+        discover = symbols is None
+        if discover:
+            symbols = sorted(os.path.splitext(name)[0] for name in os.listdir(directory)
+                             if name.lower().endswith(".csv"))
+        stocks = []
+        for symbol in symbols:
+            stock = Stock(symbol, os.path.join(directory, f"{symbol}.csv"),
+                          company=companies.get(symbol), color=colors.get(symbol))
+            if discover and len(stock.prices.dropna()) < minimum_days:
+                warnings.warn(f"Skipping {symbol}: fewer than {minimum_days} valid prices.")
+                continue
+            stocks.append(stock)
+        if not stocks:
+            raise ValueError(f"No usable price files found in {directory}.")
         return cls(stocks)
 
     def aligned(self, metric: str) -> pd.DataFrame:
@@ -64,96 +97,99 @@ class Portfolio:
     # --- Exploratory plots -------------------------------------------------
 
     def plot_time_series(self):
-        fig = plt.figure()
-        ax1 = fig.add_subplot(3, 1, 1)
+        """Adjusted prices (log scale) and daily returns for every stock."""
+        fig, (price_ax, return_ax, log_return_ax) = plt.subplots(
+            3, 1, sharex=True, figsize=(10, 8), height_ratios=[1.4, 1, 1])
         for stock in self.stocks:
-            stock.plot_time_series(ax1, stock.price_column, label="Price", legend=True)
-        for index, metric in enumerate([Stock.RETURN, Stock.LOG_RETURN], 2):
-            ax = fig.add_subplot(3, 1, index)
+            stock.plot_time_series(price_ax, stock.price_column, linewidth=1.2)
+            stock.plot_time_series(return_ax, Stock.RETURN, linewidth=0.4, alpha=0.7)
+            stock.plot_time_series(log_return_ax, Stock.LOG_RETURN, linewidth=0.4, alpha=0.7)
+        price_ax.set_yscale("log")
+        price_ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"${value:,.0f}" if value >= 1 else f"${value:g}"))
+        price_ax.set_title("Adjusted price (log scale)")
+        return_ax.set_title("Daily return")
+        log_return_ax.set_title("Daily log-return")
+        for ax in (return_ax, log_return_ax):
             draw_zero_axis(ax)
-            for stock in self.stocks:
-                stock.plot_time_series(ax, metric)
-        fig.suptitle("Time Series")
+            format_percent(ax)
+        add_figure_legend(fig, [price_ax])
+        set_figure_title(fig, "Prices and daily returns")
         return fig
 
-    def plot_distributions(self):
-        """Histogram of each stock's returns with that stock's Gaussian and
-        Cauchy fits. Fat tails show up as mass the Gaussian misses."""
-        fig = plt.figure()
-        for index, metric in enumerate([Stock.RETURN, Stock.LOG_RETURN], 1):
-            ax = fig.add_subplot(2, 1, index)
-            for stock in self.stocks:
-                stock.plot_distribution(ax, metric)
-                color = {"color": stock.color}
-                plot_gaussian(ax, stock.mean(metric), stock.volatility(metric),
-                              plot_kwargs={**color, "linestyle": "--"})
-                plot_cauchy(ax, *stock.fit_cauchy(metric), plot_kwargs={**color, "linestyle": ":"})
-            ax.set_xlim([-0.25, 0.25])
-            ax.set_ylim([0, 100])
-            if index == 1:
-                ax.legend(fontsize="small")
-        fig.suptitle("Distributions\n(Non-Gaussian)")
+    def plot_distributions(self, value_range=(-0.1, 0.1)):
+        """Histogram of each stock's returns with its own Gaussian and Cauchy fits.
+        Fat tails show up as mass the Gaussian misses."""
+        metrics = [Stock.RETURN, Stock.LOG_RETURN]
+        fig, axes = plt.subplots(len(metrics), len(self.stocks), sharex=True, sharey=True,
+                                 figsize=(3.4 * len(self.stocks) + 1, 6.5), squeeze=False)
+        x = np.linspace(*value_range, 801)
+        for row, metric in enumerate(metrics):
+            for column, stock in enumerate(self.stocks):
+                ax = axes[row, column]
+                stock.plot_distribution(ax, metric, value_range=value_range)
+                plot_gaussian(ax, stock.mean(metric), stock.volatility(metric), x=x, label="Gaussian fit",
+                              plot_kwargs={"color": INK_PRIMARY, "linewidth": 1.1})
+                plot_cauchy(ax, *stock.fit_cauchy(metric), x=x, label="Cauchy fit",
+                            plot_kwargs={"color": INK_SECONDARY, "linewidth": 1.1, "linestyle": (0, (4, 2))})
+                ax.text(0.03, 0.95, f"σ = {stock.volatility(metric):.1%}", transform=ax.transAxes,
+                        va="top", fontsize=8.5, color=INK_SECONDARY)
+                ax.set_title(stock.company if row == 0 else "")
+                ax.xaxis.set_major_locator(MultipleLocator(0.05))
+                format_percent(ax, "x", decimals=0)
+                if column == 0:
+                    ax.set_ylabel(f"{metric.capitalize()} density")
+                if row == len(metrics) - 1:
+                    ax.set_xlabel(f"Daily {metric.lower()}")
+        histogram = Patch(color=INK_MUTED, alpha=0.55, linewidth=0)
+        handles = [histogram] + axes[0, 0].get_lines()[:2]
+        add_figure_legend(fig, handles=handles, labels=["Observed (stock color)", "Gaussian fit", "Cauchy fit"])
+        set_figure_title(fig, "Daily returns have fatter tails than a Gaussian")
         return fig
 
     def plot_statistics_over_time(self, window_size: int, metric=Stock.LOG_RETURN):
-        """Plot mean and volatility over a rolling window (window_size in trading days)."""
-        fig = plt.figure()
-        ax1 = fig.add_subplot(1, 1, 1)
+        """Rolling mean and volatility (window_size in trading days)."""
+        fig, (mean_ax, volatility_ax) = plt.subplots(2, 1, sharex=True, figsize=(10, 6.5))
         for stock in self.stocks:
-            stock.plot_time_series(ax1, metric, alpha=0.3, kwargs_overrides={"linewidth": 0.5})
-            common_kwargs = {
-                "drawstyle": "steps",
-                "xlabel": Stock.DATE,
-                "ylabel": f"{metric} (log-{Stock.UNITS})",
-                "alpha": 0.7,
-                "legend": True,
-                "color": stock.color,
-                "grid": True,
-            }
             stock.mean_over_time(metric, window_size).plot(
-                metric, ax1, {**common_kwargs, "label": f"{stock.company} Mean", "linewidth": 2}
-            )
+                metric, mean_ax, label=stock.company, color=stock.color, linewidth=1.2)
             stock.volatility_over_time(metric, window_size).plot(
-                metric, ax1, {**common_kwargs, "label": f"{stock.company} Volatility", "linewidth": 1}
-            )
-        ax1.legend()
-        fig.suptitle(
-            "Non-Stationary Mean & Volatility of Log-Returns\n"
-            f"({window_size}-day rolling statistics)"
-        )
+                metric, volatility_ax, label=stock.company, color=stock.color, linewidth=1.2)
+        draw_zero_axis(mean_ax)
+        format_percent(mean_ax, decimals=2)
+        format_percent(volatility_ax, decimals=1)
+        mean_ax.set_title(f"Rolling mean of daily {metric.lower()}")
+        volatility_ax.set_title(f"Rolling volatility of daily {metric.lower()}")
+        volatility_ax.set_ylim(bottom=0)
+        add_figure_legend(fig, [mean_ax])
+        set_figure_title(fig, f"Mean and volatility drift over time ({window_size}-day rolling window)")
         return fig
 
     def compare_stocks(self, metric=Stock.LOG_RETURN, window_size=252):
-        """Plot each stock minus the reference stock, on shared dates: the
-        daily difference plus its rolling mean and rolling volatility gap."""
+        """Each stock minus the reference stock, on shared dates: the daily
+        difference, its rolling mean, and the gap in rolling volatility."""
         if len(self.stocks) < 2:
             raise ValueError("Portfolio must contain at least 2 stocks to compare.")
         table = self.metrics[metric].df.set_index(Stock.DATE)
         reference = self.reference_stock.symbol
         reference_volatility = table[reference].rolling(window_size).std()
 
-        fig, (difference_ax, mean_ax, volatility_ax) = plt.subplots(3, 1, sharex=True)
-        panels = [
-            (difference_ax, f"Δ{metric}", [-0.1, 0.1], 0.3),
-            (mean_ax, f"Mean\nΔ{metric}", [-0.01, 0.01], 0.7),
-            (volatility_ax, f"Volatility\nΔ{metric}", [-0.01, 0.01], 0.7),
-        ]
+        fig, (difference_ax, mean_ax, volatility_ax) = plt.subplots(3, 1, sharex=True, figsize=(10, 8))
         for stock in self.stocks[1:]:
             difference = table[stock.symbol] - table[reference]
-            series = [
-                difference,
-                difference.rolling(window_size).mean(),
-                table[stock.symbol].rolling(window_size).std() - reference_volatility,
-            ]
-            for (ax, _, _, alpha), values in zip(panels, series):
-                values.plot(ax=ax, label=f"{stock.symbol}-{reference}", color=stock.color, alpha=alpha)
-        for ax, ylabel, ylim, _ in panels:
+            label = f"{stock.symbol} − {reference}"
+            difference_ax.plot(difference.index, difference, color=stock.color, linewidth=0.4, alpha=0.7)
+            mean_ax.plot(difference.index, difference.rolling(window_size).mean(),
+                         color=stock.color, linewidth=1.2, label=label)
+            volatility_ax.plot(difference.index,
+                               table[stock.symbol].rolling(window_size).std() - reference_volatility,
+                               color=stock.color, linewidth=1.2)
+        titles = [f"Daily {metric.lower()} difference",
+                  f"Rolling mean of the difference ({window_size} days)",
+                  f"Rolling volatility minus {reference}'s ({window_size} days)"]
+        for ax, title in zip((difference_ax, mean_ax, volatility_ax), titles):
             draw_zero_axis(ax)
-            ax.set_ylabel(ylabel)
-            ax.set_ylim(ylim)
-            ax.grid(True)
-            ax.legend()
-        volatility_ax.set_xlabel(Stock.DATE)
-        fig.suptitle(f"Difference from {self.reference_stock.company}\n"
-                     f"({window_size}-day rolling statistics)")
+            format_percent(ax, decimals=1)
+            ax.set_title(title)
+        add_figure_legend(fig, [mean_ax])
+        set_figure_title(fig, f"Each stock compared with {self.reference_stock.company}")
         return fig
